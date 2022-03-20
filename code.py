@@ -14,13 +14,13 @@ spi = busio.SPI(board.GP10,board.GP11)
 while not spi.try_lock():
     print(".")
     pass
+
 spi.configure(baudrate=24000000) # Configure SPI for 24MHz
 spi.unlock()
 tft_cs = board.GP9
 tft_dc = board.GP8
 
 display_bus = displayio.FourWire(spi, command=tft_dc, chip_select=tft_cs, reset=board.GP12)
-
 display = ST7789(display_bus, width=240, height=135, rowstart=40,colstart=53,rotation=90)
 
 button_up = digitalio.DigitalInOut(board.GP2)
@@ -31,30 +31,32 @@ button_center = digitalio.DigitalInOut(board.GP3)
 button_center.direction = digitalio.Direction.INPUT
 button_center.pull = digitalio.Pull.UP
 
-is_game_over = False
+font = bitmap_font.load_font("fonts/Junction-regular-24.bdf")
 
-
-time = 0
-
-text = "GAME OVER"
-font = bitmap_font.load_font("fonts/LeagueSpartan-Bold-16.bdf")
-color = 0xFFFFFF
-text_game_over = label.Label(font, text=text, color=color)
-text_game_over.anchor_point = (0.5, 0.5)
-text_game_over.anchored_position = (120, 75)
-
-score = 0
-text_score = label.Label(font, text=str(score), color=color)
+text_score = label.Label(font, text=str(0), color=0xd83c02)
 text_score.anchor_point = (0, 0)
 text_score.anchored_position = (10, 10)
 
-image, palette = adafruit_imageload.load(
-    "images/logo.bmp", bitmap=displayio.Bitmap, palette=displayio.Palette
+#gameover
+gameover_image, palette = adafruit_imageload.load(
+    "images/gameover.bmp", bitmap=displayio.Bitmap, palette=displayio.Palette
 )
 palette.make_transparent(0)
-tile_grid = displayio.TileGrid(image, pixel_shader=palette)
-tile_grid.x = 120 - 39
-tile_grid.y = 75 - 50
+gameover = displayio.TileGrid(gameover_image, pixel_shader=palette)
+gameover.x = 5
+gameover.y = 30
+
+#bg
+bg_image, palette = adafruit_imageload.load(
+    "images/bg.bmp", bitmap=displayio.Bitmap, palette=displayio.Palette
+)
+palette.make_transparent(0)
+bg = displayio.TileGrid(bg_image, pixel_shader=palette)
+bg.x = 0
+bg.y = 0
+bg2 = displayio.TileGrid(bg_image, pixel_shader=palette)
+bg2.x = 240
+bg2.y = 0
 
 #cacuts
 cacuts_image, palette = adafruit_imageload.load(
@@ -63,80 +65,118 @@ cacuts_image, palette = adafruit_imageload.load(
 palette.make_transparent(0)
 cacuts = displayio.TileGrid(cacuts_image, pixel_shader=palette)
 cacuts.x = 240
-cacuts.y = 135 - 42
-cacuts_speed = 15
+cacuts.y = 135 - 48
 
 # hero (dino) sprite sheep
-hero_frame_max = 5
-hero_frame_current = 0
 hero_sprite_sheet, palette = adafruit_imageload.load("images/dino.bmp",bitmap=displayio.Bitmap,palette=displayio.Palette)
 # Create a sprite (tilegrid)
 palette.make_transparent(0)
-hero = displayio.TileGrid(hero_sprite_sheet, pixel_shader=palette,width = 1,height = 1,tile_width = 49,tile_height = 53)
-hero[0] = hero_frame_current
+hero = displayio.TileGrid(hero_sprite_sheet, pixel_shader=palette,width = 1,height = 1,tile_width = 45,tile_height = 48)
+hero[0] = 0
 hero.y = 80
 hero.x = 20
 
-hero_status = "run"
-hero_speed = 10
+class Sprite:
+    def __init__(self,TileGrid,speed):
+        self.tile=TileGrid
+        self.life=1
+        self.speed=speed
+        
+class Hero(Sprite):
+    def __init__(self):
+        Sprite.__init__(self,hero,10)
+        self.status='run'
+        self.score='0'
+        self.frame = 0
+    def update(self):
+        if self.status == "run":
+            self.frame += 1
+        if self.frame == 5 :
+            self.frame = 0
+        if self.status == "jump":
+            hero_frame_current = 1
+            self.tile.y -= self.speed
+        if self.tile.y <= 0:
+            self.tile.y = 10
+            self.status = "down"
+        if self.status == "down":
+            self.frame = 4
+            self.tile.y += player.speed
+        if self.tile.y >= 80:
+            self.tile.y = 80
+            self.status = "run"
+        hero[0] = self.frame
+
+player = Hero()
+
+class Enemy(Sprite):
+    def __init__(self):
+        Sprite.__init__(self,cacuts,15)
+    def update(self):
+        self.tile.x -= self.speed
+        if self.tile.x <= -34:
+           self.tile.x = 240
+           player.score += 1
+           text_score.text = str(player.score)
+    
+        
+enemy = Enemy()
 
 group = displayio.Group()
+group.append(bg)
+group.append(bg2)
 display.show(group)
 
+
 def init():
-    hero.y = 80
-    hero_status = "run"
-    cacuts.x = 240
-    time = 0
-    group.append(cacuts)
-    group.append(hero)
+    player.tile.y = 80
+    player.status = "run"
+    
+    enemy.tile.x = 240
+    player.time = 0
+    player.score=0
+    text_score.text = str(player.score)
+    group.append(enemy.tile)
+    group.append(player.tile)
     group.append(text_score)
-    is_game_over = False
+    player.life=1
 
 def game_restart():
-    if is_game_over:
-        group.remove(text_game_over)
-        group.remove(cacuts)
-        group.remove(hero)
-        group.remove(text_score)
-        init()
+    print('restart')
+    #group.remove(text_game_over)
+    group.remove(gameover)
+    group.remove(enemy.tile)
+    group.remove(player.tile)
+    group.remove(text_score)
+    init()
+
+pressed = False
 
 init()
-while True:
-    if is_game_over :
-        if button_center.value == 0:
-            print('restart')
-            game_restart()
-    else :
-        time += 1
-        if button_up.value == 0 and hero_status == "run":
-            hero_status = "jump"
-        if time % 2000 == 0:
-            print('fps')
-            cacuts.x -= cacuts_speed
-            if cacuts.x <= -34:
-                cacuts.x = 240
-                score += 1
-                text_score.text = str(score)
-            if hero_status == "run":
-                hero_frame_current += 1
-                if hero_frame_current == hero_frame_max :
-                    hero_frame_current = 0
-            if hero_status == "jump":
-                hero_frame_current = 1
-                hero.y -= hero_speed
-                if hero.y <= 0:
-                    hero.y = 10
-                    hero_status = "down"
-            if hero_status == "down":
-                hero_frame_current = 4
-                hero.y += hero_speed
-                if hero.y >= 80:
-                    hero.y = 80
-                    hero_status = "run"
-            if cacuts.x >= hero.x and cacuts.x <= hero.x+49 :
-                if cacuts.y >= hero.y and cacuts.y <= hero.y+53 :
-                    group.append(text_game_over)
-                    is_game_over = True
 
-        hero[0] = hero_frame_current
+while True:
+    if player.life==0 :
+        if button_center.value == 0 and pressed == False:
+            pressed = True
+        if button_center.value == 1 and pressed == True:
+               game_restart()
+               pressed = False
+    else :
+        player.time += 1
+        if button_up.value == 0 and player.status == "run":
+            player.status = "jump"
+        if player.time % 2000 == 0:
+            player.time = 0
+            enemy.update()
+            player.update()
+            bg.x-=2
+            bg2.x-=2
+            if bg2.x==0:
+                bg.x=240
+            if bg.x==0:
+                bg2.x=240
+            
+            if abs(player.tile.x-enemy.tile.x)<30 and abs(player.tile.y-enemy.tile.y)<30:
+                #group.append(text_game_over)
+                group.append(gameover)
+                player.life = 0
